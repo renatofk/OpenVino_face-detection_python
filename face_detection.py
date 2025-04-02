@@ -13,7 +13,7 @@ import argparse
 import time
 
 try:
-    from openvino.inference_engine import IECore
+    from openvino import Core
     import cv2 as cv
 except:
     raise Exception("""
@@ -42,7 +42,7 @@ args = parser.parse_args()
 device = args.device.upper()
 
 # Device Options = "CPU", "GPU", "MYRIAD"
-plugin = IECore()
+plugin = Core()
 
 
 '''  (DEPRECATED) NO NEED TO INITIALIZE EXTENSION LIBRARY SINCE OPENVINO 2020/2021
@@ -105,10 +105,15 @@ def load_model(plugin, model, weights, device):
     execution network (exec_net)
     """
     #  Read in Graph file (IR) to create network
-    net = plugin.read_network(model, weights)
+    # net = plugin.read_network(model, weights)
+    model = plugin.read_model(model, weights)
+    compiled_model = plugin.compile_model(model, "CPU")
+
     # Load the Network using Plugin Device
-    exec_net = plugin.load_network(network=net, device_name=device)
-    return net, exec_net
+    # exec_net = plugin.load_network(network=net, device_name=device)
+    exec_net = compiled_model
+
+    return model, exec_net
 
 
 ####################  CREATE EXECUTION NETWORK  #######################
@@ -121,7 +126,10 @@ net_facedetect, exec_facedetect = load_model(
 FACEDETECT_INPUTKEYS = 'data'
 FACEDETECT_OUTPUTKEYS = 'detection_out'
 #  Obtain image_count, channels, height and width
-n_facedetect, c_facedetect, h_facedetect, w_facedetect = net_facedetect.input_info[FACEDETECT_INPUTKEYS].input_data.shape
+# n_facedetect, c_facedetect, h_facedetect, w_facedetect = net_facedetect.input_info[FACEDETECT_INPUTKEYS].input_data.shape
+input_tensor = net_facedetect.inputs[0]  # Obtém a entrada do modelo
+n_facedetect, c_facedetect, h_facedetect, w_facedetect = input_tensor.shape
+
 
 
 #########################  READ VIDEO CAPTURE  ########################
@@ -149,12 +157,16 @@ while cv.waitKey(1) != ord('q'):
     #  Start asynchronous inference and get inference result
     blob = image_preprocessing(
         image, n_facedetect, c_facedetect, h_facedetect, w_facedetect)
-    req_handle = exec_facedetect.start_async(
-        request_id=0, inputs={FACEDETECT_INPUTKEYS: blob})
+    # req_handle = exec_facedetect.start_async(
+    #     request_id=0, inputs={FACEDETECT_INPUTKEYS: blob})
+    req_handle = exec_facedetect.create_infer_request()  # Cria uma requisição de inferência
+    req_handle.infer(inputs={FACEDETECT_INPUTKEYS: blob})  # Executa a inferência
+
 
     ######################## Get Inference Result  #########################
     status = req_handle.wait()
-    res = req_handle.output_blobs[FACEDETECT_OUTPUTKEYS].buffer
+    # res = req_handle.output_blobs[FACEDETECT_OUTPUTKEYS].buffer
+    res = req_handle.get_output_tensor(0).data
 
     # Get Bounding Box Result
     for detection in res[0][0]:
